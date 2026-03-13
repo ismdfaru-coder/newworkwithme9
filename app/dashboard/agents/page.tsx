@@ -266,9 +266,9 @@ export default function AgentsPage() {
         : m
     ))
 
-    // Generate agent-browser commands based on the task
-    const commands = generateAgentBrowserCommands(currentTask)
-    console.log("[v0] Generated commands:", commands)
+    // Generate Playwright commands based on the task
+    const commands = generatePlaywrightCommands(currentTask)
+    console.log("[v0] Generated Playwright commands:", commands)
     
     let allResults: string[] = []
     
@@ -294,8 +294,8 @@ export default function AgentsPage() {
           : m
       ))
 
-      // Execute the command using agent-browser (bash)
-      const result = await executeBrowserCode(cmd.code, "bash")
+      // Execute the command using Playwright (node)
+      const result = await executeBrowserCode(cmd.code, cmd.language || "node")
       
       if (result?.result) {
         allResults.push(result.result)
@@ -335,9 +335,9 @@ export default function AgentsPage() {
     setCurrentTask("")
   }
 
-  // Generate agent-browser commands based on task description
-  // agent-browser is a CLI pre-installed in Firecrawl sandbox with 40+ commands
-  const generateAgentBrowserCommands = (task: string): Array<{ code: string; description: string }> => {
+  // Generate Playwright JavaScript code for Firecrawl browser automation
+  // Firecrawl's execute API expects JavaScript code that uses the `page` object (Playwright)
+  const generatePlaywrightCommands = (task: string): Array<{ code: string; description: string; language: string }> => {
     const taskLower = task.toLowerCase()
     
     // Extract URL if present
@@ -352,9 +352,19 @@ export default function AgentsPage() {
         .trim()
       
       return [
-        { code: `agent-browser open "https://www.google.com/search?q=${encodeURIComponent(searchQuery)}"`, description: `Searching Google for "${searchQuery}"` },
-        { code: `agent-browser snapshot`, description: "Taking snapshot of search results" },
-        { code: `agent-browser scrape`, description: "Extracting search results" },
+        { 
+          code: `await page.goto("https://www.google.com/search?q=${encodeURIComponent(searchQuery)}");
+const title = await page.title();
+return { success: true, title, url: page.url() };`, 
+          description: `Searching Google for "${searchQuery}"`,
+          language: "node"
+        },
+        { 
+          code: `const results = await page.$$eval('h3', els => els.slice(0, 5).map(el => el.textContent));
+return { results };`, 
+          description: "Extracting search results",
+          language: "node"
+        },
       ]
     }
 
@@ -362,9 +372,19 @@ export default function AgentsPage() {
     if (url || taskLower.includes("go to") || taskLower.includes("visit") || taskLower.includes("open") || taskLower.includes("navigate")) {
       const targetUrl = url || "https://www.example.com"
       return [
-        { code: `agent-browser open "${targetUrl}"`, description: `Opening ${targetUrl}` },
-        { code: `agent-browser snapshot`, description: "Taking snapshot of the page" },
-        { code: `agent-browser scrape`, description: "Extracting page content" },
+        { 
+          code: `await page.goto("${targetUrl}", { waitUntil: "domcontentloaded" });
+const title = await page.title();
+return { success: true, title, url: page.url() };`, 
+          description: `Opening ${targetUrl}`,
+          language: "node"
+        },
+        { 
+          code: `const bodyText = await page.$eval('body', el => el.innerText.substring(0, 2000));
+return { content: bodyText };`, 
+          description: "Extracting page content",
+          language: "node"
+        },
       ]
     }
 
@@ -372,26 +392,19 @@ export default function AgentsPage() {
     if (taskLower.includes("screenshot") || taskLower.includes("capture") || taskLower.includes("snapshot")) {
       const targetUrl = url || "https://www.example.com"
       return [
-        { code: `agent-browser open "${targetUrl}"`, description: `Opening ${targetUrl}` },
-        { code: `agent-browser snapshot`, description: "Capturing screenshot" },
-      ]
-    }
-
-    // Fill form / interact
-    if (taskLower.includes("fill") || taskLower.includes("type") || taskLower.includes("enter") || taskLower.includes("input")) {
-      const targetUrl = url || "https://www.google.com"
-      return [
-        { code: `agent-browser open "${targetUrl}"`, description: `Opening ${targetUrl}` },
-        { code: `agent-browser snapshot`, description: "Analyzing page elements" },
-      ]
-    }
-
-    // Click something
-    if (taskLower.includes("click") || taskLower.includes("press") || taskLower.includes("tap")) {
-      const targetUrl = url || "https://www.example.com"
-      return [
-        { code: `agent-browser open "${targetUrl}"`, description: `Opening ${targetUrl}` },
-        { code: `agent-browser snapshot`, description: "Analyzing clickable elements" },
+        { 
+          code: `await page.goto("${targetUrl}", { waitUntil: "domcontentloaded" });
+const title = await page.title();
+return { success: true, title };`, 
+          description: `Opening ${targetUrl}`,
+          language: "node"
+        },
+        { 
+          code: `const screenshot = await page.screenshot({ type: 'png', fullPage: false });
+return { screenshot: 'captured' };`, 
+          description: "Capturing screenshot",
+          language: "node"
+        },
       ]
     }
 
@@ -399,25 +412,67 @@ export default function AgentsPage() {
     if (taskLower.includes("scrape") || taskLower.includes("extract") || taskLower.includes("get data") || taskLower.includes("crawl")) {
       const targetUrl = url || "https://www.example.com"
       return [
-        { code: `agent-browser open "${targetUrl}"`, description: `Opening ${targetUrl}` },
-        { code: `agent-browser scrape`, description: "Extracting all data from page" },
+        { 
+          code: `await page.goto("${targetUrl}", { waitUntil: "domcontentloaded" });
+const title = await page.title();
+return { success: true, title };`, 
+          description: `Opening ${targetUrl}`,
+          language: "node"
+        },
+        { 
+          code: `const data = await page.evaluate(() => {
+  const title = document.title;
+  const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 10).map(h => h.textContent);
+  const links = Array.from(document.querySelectorAll('a')).slice(0, 10).map(a => ({ text: a.textContent, href: a.href }));
+  const text = document.body.innerText.substring(0, 3000);
+  return { title, headings, links, text };
+});
+return data;`, 
+          description: "Extracting all data from page",
+          language: "node"
+        },
       ]
     }
 
-    // Default: try to understand the task and execute sensibly
-    // If there's a URL, navigate to it. Otherwise go to Google and search the task
+    // Default: navigate to URL or search Google
     if (url) {
       return [
-        { code: `agent-browser open "${url}"`, description: `Opening ${url}` },
-        { code: `agent-browser snapshot`, description: "Taking snapshot" },
-        { code: `agent-browser scrape`, description: "Extracting content" },
+        { 
+          code: `await page.goto("${url}", { waitUntil: "domcontentloaded" });
+const title = await page.title();
+return { success: true, title, url: page.url() };`, 
+          description: `Opening ${url}`,
+          language: "node"
+        },
+        { 
+          code: `const data = await page.evaluate(() => {
+  return {
+    title: document.title,
+    headings: Array.from(document.querySelectorAll('h1, h2')).slice(0, 5).map(h => h.textContent),
+    text: document.body.innerText.substring(0, 2000)
+  };
+});
+return data;`, 
+          description: "Extracting content",
+          language: "node"
+        },
       ]
     } else {
       // No URL - search for the task on Google
       return [
-        { code: `agent-browser open "https://www.google.com/search?q=${encodeURIComponent(task)}"`, description: `Searching for "${task}"` },
-        { code: `agent-browser snapshot`, description: "Taking snapshot of results" },
-        { code: `agent-browser scrape`, description: "Extracting search results" },
+        { 
+          code: `await page.goto("https://www.google.com/search?q=${encodeURIComponent(task)}", { waitUntil: "domcontentloaded" });
+const title = await page.title();
+return { success: true, title };`, 
+          description: `Searching for "${task}"`,
+          language: "node"
+        },
+        { 
+          code: `const results = await page.$$eval('h3', els => els.slice(0, 5).map(el => el.textContent));
+return { results };`, 
+          description: "Extracting search results",
+          language: "node"
+        },
       ]
     }
   }
@@ -1338,44 +1393,76 @@ export default function AgentsPage() {
           </div>
         </div>
 
-        {/* Browser Live View Panel */}
+        {/* Browser Live View Panel - Firecrawl Playground Style */}
         {showBrowserPanel && browserSession && (
-          <div className="flex w-1/2 flex-col border-l border-border bg-muted/30">
-            {/* Panel Header */}
-            <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3">
-              <div className="flex items-center gap-2">
+          <div className="flex w-1/2 flex-col border-l border-orange-200 dark:border-orange-900/50 bg-background">
+            {/* Panel Header - Orange accent like Firecrawl */}
+            <div className="flex items-center justify-between border-b border-orange-200 dark:border-orange-900/50 bg-gradient-to-r from-orange-50 to-background dark:from-orange-950/30 dark:to-background px-4 py-3">
+              <div className="flex items-center gap-3">
                 <div className="relative">
-                  <Monitor className="h-5 w-5 text-cyan-500" />
-                  <span className="absolute -right-1 -top-1 flex h-2 w-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 shadow-sm">
+                    <Monitor className="h-4 w-4 text-white" />
+                  </div>
+                  <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-background"></span>
                   </span>
                 </div>
-                <span className="font-medium">Live Browser Session</span>
+                <div>
+                  <span className="font-semibold text-foreground">Browser Playground</span>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500"></span>
+                      Interactive
+                    </span>
+                  </div>
+                </div>
               </div>
               <div className="flex items-center gap-2">
+                {/* View mode toggle - like Firecrawl's Interactive/View only */}
+                <div className="flex items-center gap-1 rounded-full border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/50 p-1">
+                  <button className="flex items-center gap-1.5 rounded-full bg-orange-500 px-3 py-1 text-xs font-medium text-white">
+                    <Sparkles className="h-3 w-3" />
+                    Interactive
+                  </button>
+                  <button className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+                    <Eye className="h-3 w-3" />
+                    View only
+                  </button>
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => window.open(browserSession.interactiveLiveViewUrl, '_blank')}
-                  className="gap-1.5 text-xs"
+                  className="gap-1.5 text-xs hover:bg-orange-100 dark:hover:bg-orange-950"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  Open in new tab
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={closeBrowserSession}
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-red-100 dark:hover:bg-red-950"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
             </div>
 
+            {/* Browser address bar */}
+            <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-3 rounded-full bg-red-400"></div>
+                <div className="h-3 w-3 rounded-full bg-yellow-400"></div>
+                <div className="h-3 w-3 rounded-full bg-green-400"></div>
+              </div>
+              <div className="flex-1 rounded-md bg-background border border-border px-3 py-1.5 text-xs text-muted-foreground truncate">
+                {browserSession.liveViewUrl || "about:blank"}
+              </div>
+            </div>
+
             {/* Browser iframe */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden bg-white dark:bg-zinc-900">
               <iframe
                 src={browserSession.interactiveLiveViewUrl}
                 className="h-full w-full border-0"
@@ -1384,14 +1471,17 @@ export default function AgentsPage() {
               />
             </div>
 
-            {/* Results section */}
+            {/* Results section - styled to match Firecrawl */}
             {browserResults.length > 0 && (
-              <div className="border-t border-border bg-background p-4">
-                <h4 className="mb-2 text-sm font-medium">Results</h4>
-                <div className="max-h-40 overflow-auto rounded-lg bg-muted p-3">
+              <div className="border-t border-orange-200 dark:border-orange-900/50 bg-gradient-to-r from-orange-50 to-background dark:from-orange-950/30 dark:to-background p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Code className="h-4 w-4 text-orange-500" />
+                  <h4 className="text-sm font-semibold text-foreground">Execution Results</h4>
+                </div>
+                <div className="max-h-40 overflow-auto rounded-lg bg-zinc-900 p-3 font-mono">
                   {browserResults.map((result, index) => (
-                    <pre key={index} className="text-xs text-muted-foreground whitespace-pre-wrap">
-                      {result}
+                    <pre key={index} className="text-xs text-green-400 whitespace-pre-wrap">
+                      {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
                     </pre>
                   ))}
                 </div>
@@ -1403,114 +1493,110 @@ export default function AgentsPage() {
     )
   }
 
-  // Initial view with prompt
+  // Example tasks like Firecrawl Playground
+  const exampleTasks = [
+    "Browse the YC company directory",
+    "Extract Stripe pricing",
+    "Navigate a help center",
+    "Fill out a web form",
+    "Search for AI startups",
+    "Scrape product data from Amazon",
+  ]
+
+  // Initial view with prompt - Firecrawl Playground style
   return (
-    <div className="flex h-full flex-col items-center justify-center px-4">
-      <h1 className="mb-8 text-xl font-semibold">Agents</h1>
-
-      {/* Main Heading */}
-      <h2 className="mb-12 text-center font-serif text-4xl md:text-5xl">
-        What can I do for you?
-      </h2>
-
-      {/* Input Area */}
-      <div className="w-full max-w-3xl">
-        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-          <textarea
-            ref={textareaRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Assign a task or ask anything"
-            className="min-h-[60px] w-full resize-none bg-transparent text-base outline-none placeholder:text-muted-foreground"
-            rows={2}
-            disabled={isLoading}
-          />
-
-          <div className="flex items-center justify-between pt-2">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
-                <Plus className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
-                <HandIcon />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
-                <SettingsIcon />
-              </Button>
-              
-              {/* Turbo Mode Toggle */}
-              <button
-                onClick={() => setTurboMode(!turboMode)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${
-                  turboMode 
-                    ? "border-yellow-500 bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/30" 
-                    : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
-                }`}
-                title="Turbo Mode - Ultra-fast responses powered by Cerebras"
-              >
-                <Zap className={`h-3.5 w-3.5 ${turboMode ? "fill-yellow-500" : ""}`} />
-                <span>Turbo</span>
-              </button>
+    <div className="flex h-full">
+      {/* Left Panel - Welcome & Examples */}
+      <div className="flex w-80 flex-col border-r border-border bg-muted/30 p-6">
+        <div className="mb-6">
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 shadow-sm">
+              <Monitor className="h-4 w-4 text-white" />
             </div>
-
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
-                <Smile className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground">
-                <Mic className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                className={cn(
-                  "h-10 w-10 rounded-full",
-                  inputValue.trim() && !isLoading
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground"
-                )}
-                disabled={!inputValue.trim() || isLoading}
-                onClick={handleSubmit}
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <ArrowUp className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
+            <span className="font-semibold text-foreground">Browser Playground</span>
           </div>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Welcome to the Browser Playground. This is a simple example application to show how the Browser Sandbox can be used by an AI agent. Now, tell me what you&apos;d like me to do in the browser.
+          </p>
         </div>
 
-        {/* Tools Connection Bar */}
-        {showToolsBar && (
-          <div className="mt-2 flex items-center justify-between rounded-lg border border-border bg-card px-4 py-2">
-            <div className="flex items-center gap-2">
-              <ConnectIcon />
-              <span className="text-sm text-muted-foreground">Powered by Firecrawl Browser Agent</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1">
-                <ToolIcon type="browser" />
-                <ToolIcon type="playwright" />
-                <ToolIcon type="sheets" />
-                <ToolIcon type="slack" />
-                <ToolIcon type="github" />
-                <ToolIcon type="notion" />
-              </div>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={() => setShowToolsBar(false)}>
-                <X className="h-3 w-3" />
-              </Button>
+        <div className="mb-4">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Try an Example</span>
+        </div>
+
+        <div className="flex-1 space-y-2">
+          {exampleTasks.map((task, index) => (
+            <button
+              key={index}
+              onClick={() => setInputValue(task)}
+              className="w-full rounded-lg border border-border bg-background p-3 text-left text-sm text-foreground hover:border-orange-300 hover:bg-orange-50 dark:hover:border-orange-800 dark:hover:bg-orange-950/30 transition-colors"
+            >
+              {task}
+            </button>
+          ))}
+        </div>
+
+        {/* Bottom input for quick access */}
+        <div className="mt-4 pt-4 border-t border-border">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+            <input
+              type="text"
+              placeholder="Tell the browser what to do..."
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSubmit()
+                }
+              }}
+            />
+            <Button
+              size="icon"
+              className="h-8 w-8 rounded-full bg-orange-500 text-white hover:bg-orange-600"
+              disabled={!inputValue.trim() || isLoading}
+              onClick={handleSubmit}
+            >
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Panel - Main Content (empty state with browser preview) */}
+      <div className="flex flex-1 flex-col items-center justify-center px-8 bg-muted/10">
+        <div className="text-center max-w-md">
+          <div className="mb-6 flex justify-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 shadow-lg">
+              <Monitor className="h-8 w-8 text-white" />
             </div>
           </div>
-        )}
-
-        {/* Action Buttons (Kimi-style) */}
-        <ChatActionButtons 
-          onAction={handleActionClick}
-          activeAction={activeAction}
-          className="mt-6"
-        />
+          <h2 className="mb-3 text-2xl font-semibold text-foreground">
+            Browser Agent Ready
+          </h2>
+          <p className="text-muted-foreground mb-6">
+            Select an example task or type your own command in the left panel. The browser will appear here once you start a task.
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 dark:bg-orange-950/50 px-3 py-1 text-xs font-medium text-orange-700 dark:text-orange-300">
+              <Globe className="h-3 w-3" />
+              Web Scraping
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 dark:bg-orange-950/50 px-3 py-1 text-xs font-medium text-orange-700 dark:text-orange-300">
+              <FileText className="h-3 w-3" />
+              Data Extraction
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 dark:bg-orange-950/50 px-3 py-1 text-xs font-medium text-orange-700 dark:text-orange-300">
+              <Code className="h-3 w-3" />
+              Form Automation
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Document Wizard (Kimi-style) */}
@@ -1815,7 +1901,7 @@ function ConnectIcon() {
 function ToolIcon({ type }: { type: string }) {
   const icons: Record<string, React.ReactNode> = {
     browser: (
-      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-600">
+      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-orange-600">
         <Monitor className="h-3 w-3 text-white" />
       </div>
     ),
