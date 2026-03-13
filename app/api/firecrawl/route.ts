@@ -74,13 +74,12 @@ export async function POST(request: NextRequest) {
     if (action === "close" && sessionId) {
       console.log("[v0] Closing session:", sessionId)
       
-      const response = await fetch(FIRECRAWL_API_URL, {
+      // DELETE endpoint requires session ID in URL path
+      const response = await fetch(`${FIRECRAWL_API_URL}/${sessionId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${FIRECRAWL_API_KEY}`,
-          "Content-Type": "application/json",
         },
-        body: JSON.stringify({ id: sessionId }),
       })
 
       if (!response.ok) {

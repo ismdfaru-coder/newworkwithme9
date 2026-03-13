@@ -266,9 +266,9 @@ export default function AgentsPage() {
         : m
     ))
 
-    // Generate Playwright commands based on the task
-    const commands = generatePlaywrightCommands(currentTask)
-    console.log("[v0] Generated Playwright commands:", commands)
+    // Generate agent-browser commands based on the task
+    const commands = generateAgentBrowserCommands(currentTask)
+    console.log("[v0] Generated agent-browser commands:", commands)
     
     let allResults: string[] = []
     
@@ -294,8 +294,8 @@ export default function AgentsPage() {
           : m
       ))
 
-      // Execute the command using Playwright (node)
-      const result = await executeBrowserCode(cmd.code, cmd.language || "node")
+      // Execute the command using agent-browser (bash)
+      const result = await executeBrowserCode(cmd.code, cmd.language || "bash")
       
       if (result?.result) {
         allResults.push(result.result)
@@ -335,9 +335,10 @@ export default function AgentsPage() {
     setCurrentTask("")
   }
 
-  // Generate Playwright JavaScript code for Firecrawl browser automation
-  // Firecrawl's execute API expects JavaScript code that uses the `page` object (Playwright)
-  const generatePlaywrightCommands = (task: string): Array<{ code: string; description: string; language: string }> => {
+  // Generate agent-browser commands for Firecrawl browser automation
+  // agent-browser is a CLI pre-installed in Firecrawl sandbox with 40+ commands
+  // Use language: "bash" with agent-browser commands (NOT Playwright Node code which requires async wrapper)
+  const generateAgentBrowserCommands = (task: string): Array<{ code: string; description: string; language: string }> => {
     const taskLower = task.toLowerCase()
     
     // Extract URL if present
@@ -353,17 +354,19 @@ export default function AgentsPage() {
       
       return [
         { 
-          code: `await page.goto("https://www.google.com/search?q=${encodeURIComponent(searchQuery)}");
-const title = await page.title();
-return { success: true, title, url: page.url() };`, 
+          code: `agent-browser open "https://www.google.com/search?q=${encodeURIComponent(searchQuery)}"`,
           description: `Searching Google for "${searchQuery}"`,
-          language: "node"
+          language: "bash"
         },
         { 
-          code: `const results = await page.$$eval('h3', els => els.slice(0, 5).map(el => el.textContent));
-return { results };`, 
+          code: `agent-browser snapshot`,
+          description: "Taking snapshot of results",
+          language: "bash"
+        },
+        { 
+          code: `agent-browser scrape`,
           description: "Extracting search results",
-          language: "node"
+          language: "bash"
         },
       ]
     }
@@ -373,17 +376,19 @@ return { results };`,
       const targetUrl = url || "https://www.example.com"
       return [
         { 
-          code: `await page.goto("${targetUrl}", { waitUntil: "domcontentloaded" });
-const title = await page.title();
-return { success: true, title, url: page.url() };`, 
+          code: `agent-browser open "${targetUrl}"`,
           description: `Opening ${targetUrl}`,
-          language: "node"
+          language: "bash"
         },
         { 
-          code: `const bodyText = await page.$eval('body', el => el.innerText.substring(0, 2000));
-return { content: bodyText };`, 
+          code: `agent-browser snapshot`,
+          description: "Taking snapshot",
+          language: "bash"
+        },
+        { 
+          code: `agent-browser scrape`,
           description: "Extracting page content",
-          language: "node"
+          language: "bash"
         },
       ]
     }
@@ -393,17 +398,14 @@ return { content: bodyText };`,
       const targetUrl = url || "https://www.example.com"
       return [
         { 
-          code: `await page.goto("${targetUrl}", { waitUntil: "domcontentloaded" });
-const title = await page.title();
-return { success: true, title };`, 
+          code: `agent-browser open "${targetUrl}"`,
           description: `Opening ${targetUrl}`,
-          language: "node"
+          language: "bash"
         },
         { 
-          code: `const screenshot = await page.screenshot({ type: 'png', fullPage: false });
-return { screenshot: 'captured' };`, 
+          code: `agent-browser snapshot`,
           description: "Capturing screenshot",
-          language: "node"
+          language: "bash"
         },
       ]
     }
@@ -413,23 +415,30 @@ return { screenshot: 'captured' };`,
       const targetUrl = url || "https://www.example.com"
       return [
         { 
-          code: `await page.goto("${targetUrl}", { waitUntil: "domcontentloaded" });
-const title = await page.title();
-return { success: true, title };`, 
+          code: `agent-browser open "${targetUrl}"`,
           description: `Opening ${targetUrl}`,
-          language: "node"
+          language: "bash"
         },
         { 
-          code: `const data = await page.evaluate(() => {
-  const title = document.title;
-  const headings = Array.from(document.querySelectorAll('h1, h2, h3')).slice(0, 10).map(h => h.textContent);
-  const links = Array.from(document.querySelectorAll('a')).slice(0, 10).map(a => ({ text: a.textContent, href: a.href }));
-  const text = document.body.innerText.substring(0, 3000);
-  return { title, headings, links, text };
-});
-return data;`, 
+          code: `agent-browser scrape`,
           description: "Extracting all data from page",
-          language: "node"
+          language: "bash"
+        },
+      ]
+    }
+
+    // Flight search - special handling for Google Flights
+    if (taskLower.includes("flight") || taskLower.includes("cheapest") || taskLower.includes("airline")) {
+      return [
+        { 
+          code: `agent-browser open "https://www.google.com/flights"`,
+          description: "Opening Google Flights",
+          language: "bash"
+        },
+        { 
+          code: `agent-browser snapshot -i`,
+          description: "Analyzing page elements",
+          language: "bash"
         },
       ]
     }
@@ -438,40 +447,38 @@ return data;`,
     if (url) {
       return [
         { 
-          code: `await page.goto("${url}", { waitUntil: "domcontentloaded" });
-const title = await page.title();
-return { success: true, title, url: page.url() };`, 
+          code: `agent-browser open "${url}"`,
           description: `Opening ${url}`,
-          language: "node"
+          language: "bash"
         },
         { 
-          code: `const data = await page.evaluate(() => {
-  return {
-    title: document.title,
-    headings: Array.from(document.querySelectorAll('h1, h2')).slice(0, 5).map(h => h.textContent),
-    text: document.body.innerText.substring(0, 2000)
-  };
-});
-return data;`, 
+          code: `agent-browser snapshot`,
+          description: "Taking snapshot",
+          language: "bash"
+        },
+        { 
+          code: `agent-browser scrape`,
           description: "Extracting content",
-          language: "node"
+          language: "bash"
         },
       ]
     } else {
       // No URL - search for the task on Google
       return [
         { 
-          code: `await page.goto("https://www.google.com/search?q=${encodeURIComponent(task)}", { waitUntil: "domcontentloaded" });
-const title = await page.title();
-return { success: true, title };`, 
+          code: `agent-browser open "https://www.google.com/search?q=${encodeURIComponent(task)}"`,
           description: `Searching for "${task}"`,
-          language: "node"
+          language: "bash"
         },
         { 
-          code: `const results = await page.$$eval('h3', els => els.slice(0, 5).map(el => el.textContent));
-return { results };`, 
+          code: `agent-browser snapshot`,
+          description: "Taking snapshot",
+          language: "bash"
+        },
+        { 
+          code: `agent-browser scrape`,
           description: "Extracting search results",
-          language: "node"
+          language: "bash"
         },
       ]
     }
