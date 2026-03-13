@@ -6,7 +6,8 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const FC_BASE = "https://api.firecrawl.dev";
-const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || "fc-b936f7ea88a74ff39a8d10c75fe5927f";
+// Use the same API key as firecrawl route
+const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || "fc-21c577cb2e1a48d1a850e2850aceb4b4";
 
 async function fc(path: string, method = "GET", body?: object, key?: string) {
   const res = await fetch(`${FC_BASE}${path}`, {
@@ -14,12 +15,19 @@ async function fc(path: string, method = "GET", body?: object, key?: string) {
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
+  
+  // Check for HTTP errors before parsing JSON
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Firecrawl API error: ${res.status} - ${errorText}`);
+  }
+  
   return res.json();
 }
 
 // Use Keyplex API to summarize the final raw output into a clean answer
-async function summarise(rawOutput: string, query: string, apiKey: string) {
-  if (!apiKey) return rawOutput;
+async function summarise(rawOutput: string, query: string, apiKey: string): Promise<string> {
+  if (!apiKey || apiKey === "") return rawOutput;
   
   try {
     const res = await fetch("https://api.keyplex.io/v1/chat/completions", {
@@ -37,9 +45,16 @@ async function summarise(rawOutput: string, query: string, apiKey: string) {
         max_tokens: 800,
       }),
     });
+    
+    if (!res.ok) {
+      // If Keyplex fails, just return raw output without throwing
+      return rawOutput;
+    }
+    
     const data = await res.json();
     return data.choices?.[0]?.message?.content ?? rawOutput;
   } catch {
+    // Silently fail and return raw output
     return rawOutput;
   }
 }
