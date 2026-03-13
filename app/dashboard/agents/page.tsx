@@ -179,7 +179,6 @@ export default function AgentsPage() {
     if (!browserSession?.id) return null
 
     try {
-      console.log("[v0] Executing browser command:", code, "language:", language)
       const response = await fetch("/api/firecrawl", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -192,7 +191,6 @@ export default function AgentsPage() {
       })
 
       const data: FirecrawlResponse = await response.json()
-      console.log("[v0] Browser execution result:", data)
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to execute code")
@@ -228,14 +226,154 @@ export default function AgentsPage() {
     }
   }, [browserSession])
 
-  // Handle "Work with me" button click
+  // Handle "Work with me" button click - Uses FIRE-1 model with SSE streaming
   const handleWorkWithMe = async () => {
     if (!currentTask.trim()) return
 
     setIsLoading(true)
     setShowWorkWithMeButton(false)
+    setIsBrowserLoading(true)
 
-    // Create browser session first
+    const assistantMessageId = crypto.randomUUID()
+
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      timestamp: new Date(),
+      status: "browsing",
+      steps: [
+        {
+          id: crypto.randomUUID(),
+          type: "browsing",
+          description: "Starting FIRE-1 browser agent...",
+          timestamp: new Date(),
+        }
+      ]
+    }
+
+    setMessages(prev => prev.map(m => 
+      m.role === "assistant" && m.content.includes("Work with me")
+        ? assistantMessage
+        : m
+    ))
+
+    try {
+      // Use the new /api/agent endpoint with SSE streaming
+      // FIRE-1 handles ALL browser commands automatically from natural language
+      const eventSource = new EventSource(`/api/agent?query=${encodeURIComponent(currentTask)}`);
+      
+      let rawOutput = "";
+      let summaryText = "";
+
+      eventSource.addEventListener("step", (e) => {
+        const data = JSON.parse(e.data);
+        setMessages(prev => prev.map(m => 
+          m.id === assistantMessageId 
+            ? { 
+                ...m, 
+                steps: [
+                  ...(m.steps || []),
+                  {
+                    id: crypto.randomUUID(),
+                    type: data.type === "executing" ? "browsing" : "info",
+                    description: data.desc,
+                    timestamp: new Date(),
+                  }
+                ]
+              }
+            : m
+        ));
+      });
+
+      eventSource.addEventListener("session", (e) => {
+        const data = JSON.parse(e.data);
+        // Set browser session with liveViewUrl from FIRE-1
+        setBrowserSession({
+          id: data.sessionId,
+          liveViewUrl: data.liveViewUrl,
+          interactiveLiveViewUrl: data.interactiveLiveViewUrl,
+        });
+        setShowBrowserPanel(true);
+        setIsBrowserLoading(false);
+      });
+
+      eventSource.addEventListener("rawResult", (e) => {
+        const data = JSON.parse(e.data);
+        rawOutput = data.output;
+        setBrowserResults(prev => [...prev, rawOutput]);
+      });
+
+      eventSource.addEventListener("summary", (e) => {
+        const data = JSON.parse(e.data);
+        summaryText = data.text;
+      });
+
+      eventSource.addEventListener("done", (e) => {
+        eventSource.close();
+        
+        const finalContent = summaryText || rawOutput || "Task completed. Watch the browser panel to see what happened.";
+        
+        setMessages(prev => prev.map(m => 
+          m.id === assistantMessageId 
+            ? { 
+                ...m, 
+                content: finalContent,
+                status: "complete",
+                steps: [
+                  ...(m.steps || []),
+                  {
+                    id: crypto.randomUUID(),
+                    type: "success",
+                    description: "FIRE-1 completed the task",
+                    timestamp: new Date(),
+                  }
+                ]
+              }
+            : m
+        ));
+        
+        setIsLoading(false);
+      });
+
+      eventSource.addEventListener("error", (e) => {
+        eventSource.close();
+        const data = e.data ? JSON.parse(e.data) : { message: "Connection error" };
+        
+        setMessages(prev => prev.map(m => 
+          m.id === assistantMessageId 
+            ? { 
+                ...m, 
+                content: `Error: ${data.message}`,
+                status: "error",
+              }
+            : m
+        ));
+        
+        setIsLoading(false);
+        setIsBrowserLoading(false);
+      });
+
+      // Handle connection errors
+      eventSource.onerror = () => {
+        eventSource.close();
+        setIsLoading(false);
+        setIsBrowserLoading(false);
+      };
+
+    } catch {
+      setIsLoading(false);
+      setIsBrowserLoading(false);
+    }
+  }
+
+  // Legacy handler for manual command execution (kept for reference)
+  const handleWorkWithMeLegacy = async () => {
+    if (!currentTask.trim()) return
+
+    setIsLoading(true)
+    setShowWorkWithMeButton(false)
+
     const session = await createBrowserSession()
     if (!session) {
       setIsLoading(false)
@@ -266,17 +404,13 @@ export default function AgentsPage() {
         : m
     ))
 
-    // Generate agent-browser commands based on the task
     const commands = generateAgentBrowserCommands(currentTask)
-    console.log("[v0] Generated agent-browser commands:", commands)
     
     let allResults: string[] = []
     
-    // Execute each command sequentially
     for (let i = 0; i < commands.length; i++) {
       const cmd = commands[i]
       
-      // Update status for each step
       setMessages(prev => prev.map(m => 
         m.id === assistantMessageId 
           ? { 
@@ -294,20 +428,17 @@ export default function AgentsPage() {
           : m
       ))
 
-      // Execute the command using agent-browser (bash)
       const result = await executeBrowserCode(cmd.code, cmd.language || "bash")
       
       if (result?.result) {
         allResults.push(result.result)
       }
       
-      // Small delay between commands to let browser update
       if (i < commands.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
     }
 
-    // Update with final results
     const finalContent = allResults.length > 0 
       ? `Task completed! Here are the results:\n\n${allResults.join("\n\n")}`
       : "Task completed. Watch the browser panel to see what happened."
